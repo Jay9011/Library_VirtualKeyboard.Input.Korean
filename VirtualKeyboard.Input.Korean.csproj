@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VirtualKeyboard.Input\VirtualKeyboard.Input.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Composer\" />
+  </ItemGroup>
+
+</Project>
