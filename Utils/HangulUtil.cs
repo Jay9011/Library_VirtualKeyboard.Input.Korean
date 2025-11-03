@@ -1,90 +1,34 @@
-﻿using System;
-
-namespace VirtualKeyboard.Input.Korean.Utils
+﻿namespace VirtualKeyboard.Input.Korean.Utils
 {
     /// <summary>
-    /// 한글 유니코드 조합/분해 유틸리티
+    /// 한글 조합/분해 유틸리티 (두벌식 전용)
     /// </summary>
     public static class HangulUtil
     {
-        // 유니코드 범위
-        private const int HANGUL_BASE = 0xAC00;  // '가'
-        private const int HANGUL_END = 0xD7A3;   // '힣'
-
-        // 조합 상수
-        private const int JONGSEONG_COUNT = 28;
-        private const int JUNGSEONG_COUNT = 21;
-        private const int CHOSEONG_COUNT = 19;
-
-        /// <summary>
-        /// 초성 목록 (19개)
-        /// </summary>
-        public static readonly char[] CHOSEONG = {
-            'ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ',
-            'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
-        };
-
-        /// <summary>
-        /// 중성 목록 (21개)
-        /// </summary>
-        public static readonly char[] JUNGSEONG = {
-            'ㅏ', 'ㅐ', 'ㅑ', 'ㅒ', 'ㅓ', 'ㅔ', 'ㅕ', 'ㅖ', 'ㅗ', 'ㅘ',
-            'ㅙ', 'ㅚ', 'ㅛ', 'ㅜ', 'ㅝ', 'ㅞ', 'ㅟ', 'ㅠ', 'ㅡ', 'ㅢ', 'ㅣ'
-        };
-
-        /// <summary>
-        /// 종성 목록 (27개 + 없음)
-        /// </summary>
-        public static readonly char[] JONGSEONG = {
-            '\0', 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ',
-            'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ',
-            'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
-        };
+        #region 한글 조합/분해
 
         /// <summary>
         /// 한글 음절인지 확인
         /// </summary>
         public static bool IsHangulSyllable(char ch)
         {
-            return ch >= HANGUL_BASE && ch <= HANGUL_END;
-        }
-
-        /// <summary>
-        /// 초성인지 확인
-        /// </summary>
-        public static bool IsChoseong(char ch)
-        {
-            return Array.IndexOf(CHOSEONG, ch) >= 0;
-        }
-
-        /// <summary>
-        /// 중성인지 확인
-        /// </summary>
-        public static bool IsJungseong(char ch)
-        {
-            return Array.IndexOf(JUNGSEONG, ch) >= 0;
-        }
-
-        /// <summary>
-        /// 종성인지 확인
-        /// </summary>
-        public static bool IsJongseong(char ch)
-        {
-            return Array.IndexOf(JONGSEONG, ch) >= 1; // 0번은 없음이므로 제외
+            return ch >= HangulLibrary.HANGUL_BASE && ch <= HangulLibrary.HANGUL_END;
         }
 
         /// <summary>
         /// 한글 음절 분해
         /// </summary>
+        /// <param name="syllable">분해할 한글 음절</param>
+        /// <returns>(초성 인덱스, 중성 인덱스, 종성 인덱스)</returns>
         public static (int choseong, int jungseong, int jongseong) Decompose(char syllable)
         {
             if (!IsHangulSyllable(syllable))
                 return (-1, -1, -1);
 
-            int code = syllable - HANGUL_BASE;
-            int choseong = code / (JUNGSEONG_COUNT * JONGSEONG_COUNT);
-            int jungseong = (code % (JUNGSEONG_COUNT * JONGSEONG_COUNT)) / JONGSEONG_COUNT;
-            int jongseong = code % JONGSEONG_COUNT;
+            int code = syllable - HangulLibrary.HANGUL_BASE;
+            int choseong = code / (HangulLibrary.JUNGSEONG_COUNT * HangulLibrary.JONGSEONG_COUNT);
+            int jungseong = (code % (HangulLibrary.JUNGSEONG_COUNT * HangulLibrary.JONGSEONG_COUNT)) / HangulLibrary.JONGSEONG_COUNT;
+            int jongseong = code % HangulLibrary.JONGSEONG_COUNT;
 
             return (choseong, jungseong, jongseong);
         }
@@ -92,49 +36,34 @@ namespace VirtualKeyboard.Input.Korean.Utils
         /// <summary>
         /// 한글 음절 조합
         /// </summary>
+        /// <param name="choseong">초성 인덱스</param>
+        /// <param name="jungseong">중성 인덱스</param>
+        /// <param name="jongseong">종성 인덱스</param>
+        /// <returns>조합된 한글 음절 (실패 시 '\0')</returns>
         public static char Compose(int choseong, int jungseong, int jongseong)
         {
-            if (choseong < 0 || choseong >= CHOSEONG_COUNT)
+            if (choseong < 0 || choseong >= HangulLibrary.CHOSEONG_COUNT)
                 return '\0';
-            if (jungseong < 0 || jungseong >= JUNGSEONG_COUNT)
+            if (jungseong < 0 || jungseong >= HangulLibrary.JUNGSEONG_COUNT)
                 return '\0';
-            if (jongseong < 0 || jongseong >= JONGSEONG_COUNT)
+            if (jongseong < 0 || jongseong >= HangulLibrary.JONGSEONG_COUNT)
                 return '\0';
 
-            int code = HANGUL_BASE +
-                       (choseong * JUNGSEONG_COUNT * JONGSEONG_COUNT) +
-                       (jungseong * JONGSEONG_COUNT) +
+            int code = HangulLibrary.HANGUL_BASE +
+                       (choseong * HangulLibrary.JUNGSEONG_COUNT * HangulLibrary.JONGSEONG_COUNT) +
+                       (jungseong * HangulLibrary.JONGSEONG_COUNT) +
                        jongseong;
 
             return (char)code;
         }
 
-        /// <summary>
-        /// 초성 인덱스 찾기
-        /// </summary>
-        public static int GetChoseongIndex(char ch)
-        {
-            return Array.IndexOf(CHOSEONG, ch);
-        }
+        #endregion
 
-        /// <summary>
-        /// 중성 인덱스 찾기
-        /// </summary>
-        public static int GetJungseongIndex(char ch)
-        {
-            return Array.IndexOf(JUNGSEONG, ch);
-        }
-
-        /// <summary>
-        /// 종성 인덱스 찾기
-        /// </summary>
-        public static int GetJongseongIndex(char ch)
-        {
-            return Array.IndexOf(JONGSEONG, ch);
-        }
+        #region 두벌식 복합 자모 조합/분해
 
         /// <summary>
         /// 복합 중성 조합 시도 (예: ㅗ + ㅏ = ㅘ)
+        /// 두벌식 입력 방식 전용
         /// </summary>
         public static bool TryCombineJungseong(char first, char second, out char combined)
         {
@@ -164,6 +93,7 @@ namespace VirtualKeyboard.Input.Korean.Utils
 
         /// <summary>
         /// 복합 중성 분해 (예: ㅘ → ㅗ, ㅏ)
+        /// 두벌식 입력 방식 전용
         /// </summary>
         public static bool TryDecomposeJungseong(char jungseong, out char first, out char second)
         {
@@ -185,6 +115,7 @@ namespace VirtualKeyboard.Input.Korean.Utils
 
         /// <summary>
         /// 복합 종성 조합 시도 (예: ㄱ + ㅅ = ㄳ)
+        /// 두벌식 입력 방식 전용
         /// </summary>
         public static bool TryCombineJongseong(char first, char second, out char combined)
         {
@@ -221,6 +152,7 @@ namespace VirtualKeyboard.Input.Korean.Utils
 
         /// <summary>
         /// 복합 종성 분해 (예: ㄳ → ㄱ, ㅅ)
+        /// 두벌식 입력 방식 전용
         /// </summary>
         public static bool TryDecomposeJongseong(char jongseong, out char first, out char second)
         {
@@ -243,6 +175,8 @@ namespace VirtualKeyboard.Input.Korean.Utils
                 default: return false;
             }
         }
+
+        #endregion
     }
 }
 

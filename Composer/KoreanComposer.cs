@@ -30,9 +30,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
                 return false;
 
             char ch = input[0];
-            return HangulUtil.IsChoseong(ch) ||
-                   HangulUtil.IsJungseong(ch) ||
-                   HangulUtil.IsJongseong(ch);
+            return HangulLibrary.IsJamo(ch);
         }
 
         public CompositionResult ProcessInput(CompositionContext context, string input)
@@ -44,13 +42,13 @@ namespace VirtualKeyboard.Input.Korean.Composer
             char jamo = input[0];
 
             // 초성 입력
-            if (HangulUtil.IsChoseong(jamo))
+            if (HangulLibrary.IsChoseong(jamo))
             {
                 return ProcessChoseong(state, jamo);
             }
 
             // 중성 입력
-            if (HangulUtil.IsJungseong(jamo))
+            if (HangulLibrary.IsJungseong(jamo))
             {
                 return ProcessJungseong(state, jamo);
             }
@@ -63,14 +61,14 @@ namespace VirtualKeyboard.Input.Korean.Composer
         /// </summary>
         private CompositionResult ProcessChoseong(KoreanState state, char choseong)
         {
-            int choseongIndex = HangulUtil.GetChoseongIndex(choseong);
+            int choseongIndex = HangulLibrary.GetChoseongIndex(choseong);
             if (choseongIndex < 0)
                 return CompositionResult.Failed("잘못된 초성");
 
             // 상태 1: 종성만 있으면 확정 후 새 초성
             if (state.HasJongseongOnly)
             {
-                char jongseong = HangulUtil.JONGSEONG[state.JongseongIndex];
+                char jongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
                 state.Reset();
                 state.ChoseongIndex = choseongIndex;
 
@@ -94,12 +92,12 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 상태 3: 초성만 있으면 복합 종성 조합 시도
             if (state.HasChoseongOnly)
             {
-                char currentChoseong = HangulUtil.CHOSEONG[state.ChoseongIndex];
+                char currentChoseong = HangulLibrary.CHOSEONG[state.ChoseongIndex];
 
                 // 복합 종성 조합 가능?
                 if (HangulUtil.TryCombineJongseong(currentChoseong, choseong, out char combined))
                 {
-                    int combinedIndex = HangulUtil.GetJongseongIndex(combined);
+                    int combinedIndex = HangulLibrary.GetJongseongIndex(combined);
 
                     // 종성만 있는 상태로 전환
                     state.ChoseongIndex = -1;
@@ -127,7 +125,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 상태 4: 중성까지 있으면 종성으로 시도
             if (state.HasChoseongAndJungseong)
             {
-                int jongseongIndex = HangulUtil.GetJongseongIndex(choseong);
+                int jongseongIndex = HangulLibrary.GetJongseongIndex(choseong);
                 if (jongseongIndex > 0)
                 {
                     state.JongseongIndex = jongseongIndex;
@@ -142,12 +140,12 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 상태 5: 종성까지 있으면 복합 종성 시도
             if (state.IsComplete)
             {
-                char currentJongseong = HangulUtil.JONGSEONG[state.JongseongIndex];
+                char currentJongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
 
                 // 복합 종성 조합 시도
                 if (HangulUtil.TryCombineJongseong(currentJongseong, choseong, out char combined))
                 {
-                    int combinedIndex = HangulUtil.GetJongseongIndex(combined);
+                    int combinedIndex = HangulLibrary.GetJongseongIndex(combined);
                     if (combinedIndex > 0)
                     {
                         state.JongseongIndex = combinedIndex;
@@ -179,7 +177,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
         /// </summary>
         private CompositionResult ProcessJungseong(KoreanState state, char jungseong)
         {
-            int jungseongIndex = HangulUtil.GetJungseongIndex(jungseong);
+            int jungseongIndex = HangulLibrary.GetJungseongIndex(jungseong);
             if (jungseongIndex < 0)
                 return CompositionResult.Failed("잘못된 중성");
 
@@ -197,11 +195,11 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 상태 2: 중성 + 중성 복합 모음 조합 시도
             if (state.ChoseongIndex >= 0 && state.JungseongIndex >= 0 && state.JongseongIndex == 0)
             {
-                char currentJungseong = HangulUtil.JUNGSEONG[state.JungseongIndex];
+                char currentJungseong = HangulLibrary.JUNGSEONG[state.JungseongIndex];
 
                 if (HangulUtil.TryCombineJungseong(currentJungseong, jungseong, out char combined))
                 {
-                    int combinedIndex = HangulUtil.GetJungseongIndex(combined);
+                    int combinedIndex = HangulLibrary.GetJungseongIndex(combined);
                     if (combinedIndex >= 0)
                     {
                         state.JungseongIndex = combinedIndex;
@@ -217,20 +215,20 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 상태 3: 종성이 있으면 분리 (종성 → 초성으로 전환)
             if (state.IsComplete)
             {
-                char jongseong = HangulUtil.JONGSEONG[state.JongseongIndex];
+                char jongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
 
                 // 복합 종성이면 분해
                 if (HangulUtil.TryDecomposeJongseong(jongseong, out char first, out char second))
                 {
                     // 첫 번째는 종성으로 유지, 두 번째는 새 글자의 초성
-                    int firstIndex = HangulUtil.GetJongseongIndex(first);
+                    int firstIndex = HangulLibrary.GetJongseongIndex(first);
                     state.JongseongIndex = firstIndex;
 
                     string currentSyllable = BuildSyllable(state);
 
                     // 새 글자 시작
                     state.Reset();
-                    int newChoseongIndex = HangulUtil.GetChoseongIndex(second);
+                    int newChoseongIndex = HangulLibrary.GetChoseongIndex(second);
                     state.ChoseongIndex = newChoseongIndex;
                     state.JungseongIndex = jungseongIndex;
 
@@ -245,7 +243,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
                 else
                 {
                     // 단일 종성이면 새 글자의 초성으로
-                    int newChoseongIndex = HangulUtil.GetChoseongIndex(jongseong);
+                    int newChoseongIndex = HangulLibrary.GetChoseongIndex(jongseong);
                     state.JongseongIndex = 0;
 
                     string currentSyllable = BuildSyllable(state);
@@ -267,13 +265,13 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 상태 4: 종성만 있으면 분해 (ㄳ + ㅏ → ㄱ 확정, 사 조합)
             if (state.HasJongseongOnly)
             {
-                char jongseong = HangulUtil.JONGSEONG[state.JongseongIndex];
+                char jongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
 
                 // 복합 종성이면 분해
                 if (HangulUtil.TryDecomposeJongseong(jongseong, out char first, out char second))
                 {
                     // 첫 번째는 확정, 두 번째는 새 글자의 초성
-                    int newChoseongIndex = HangulUtil.GetChoseongIndex(second);
+                    int newChoseongIndex = HangulLibrary.GetChoseongIndex(second);
                     state.Reset();
                     state.ChoseongIndex = newChoseongIndex;
                     state.JungseongIndex = jungseongIndex;
@@ -289,7 +287,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
                 else
                 {
                     // 단일 종성이면 새 글자의 초성으로
-                    int newChoseongIndex = HangulUtil.GetChoseongIndex(jongseong);
+                    int newChoseongIndex = HangulLibrary.GetChoseongIndex(jongseong);
                     state.Reset();
                     state.ChoseongIndex = newChoseongIndex;
                     state.JungseongIndex = jungseongIndex;
@@ -325,12 +323,12 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 종성 있으면 제거
             if (state.JongseongIndex > 0)
             {
-                char jongseong = HangulUtil.JONGSEONG[state.JongseongIndex];
+                char jongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
 
                 // 복합 종성이면 분해
                 if (HangulUtil.TryDecomposeJongseong(jongseong, out char first, out _))
                 {
-                    int firstIndex = HangulUtil.GetJongseongIndex(first);
+                    int firstIndex = HangulLibrary.GetJongseongIndex(first);
                     state.JongseongIndex = firstIndex;
                     string syllable = BuildSyllable(state);
                     return CompositionResult.Succeeded(
@@ -352,12 +350,12 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 중성 있으면 제거 또는 분해
             if (state.JungseongIndex >= 0)
             {
-                char jungseong = HangulUtil.JUNGSEONG[state.JungseongIndex];
+                char jungseong = HangulLibrary.JUNGSEONG[state.JungseongIndex];
 
                 // 복합 중성이면 분해
                 if (HangulUtil.TryDecomposeJungseong(jungseong, out char first, out _))
                 {
-                    int firstIndex = HangulUtil.GetJungseongIndex(first);
+                    int firstIndex = HangulLibrary.GetJungseongIndex(first);
                     state.JungseongIndex = firstIndex;
                     string syllable = BuildSyllable(state);
                     return CompositionResult.Succeeded(
@@ -370,7 +368,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
                     // 단일 중성이면 제거
                     state.JungseongIndex = -1;
                     string result = state.ChoseongIndex >= 0
-                        ? HangulUtil.CHOSEONG[state.ChoseongIndex].ToString()
+                        ? HangulLibrary.CHOSEONG[state.ChoseongIndex].ToString()
                         : "";
 
                     return CompositionResult.Succeeded(
@@ -441,7 +439,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 초성만
             if (state.HasChoseongOnly)
             {
-                return HangulUtil.CHOSEONG[state.ChoseongIndex].ToString();
+                return HangulLibrary.CHOSEONG[state.ChoseongIndex].ToString();
             }
 
             // 초성 + 중성 (+ 종성 선택)
@@ -459,7 +457,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 중성만 (초성 없이)
             if (state.JungseongIndex >= 0)
             {
-                return HangulUtil.JUNGSEONG[state.JungseongIndex].ToString();
+                return HangulLibrary.JUNGSEONG[state.JungseongIndex].ToString();
             }
 
             return "";
