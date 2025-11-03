@@ -2,14 +2,37 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <Title>$(AssemblyName)</Title>
+    <Version>1.0.0</Version>
+    <Authors>Jay9011</Authors>
+    <Company>SECUiDEA</Company>
+    <Description>한글 가상 키보드 지원</Description>
+    <Copyright>Jay9011</Copyright>
+    <PackageReadmeFile>ReadMe.md</PackageReadmeFile>
+    <RepositoryUrl>http://192.168.0.39/VirtualKeyboard.Input.Korean.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReleaseNotes>한글 가상 키보드</PackageReleaseNotes>
+    <AssemblyVersion>$(VersionPrefix)</AssemblyVersion>
+    <FileVersion>$(VersionPrefix)</FileVersion>
   </PropertyGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\VirtualKeyboard.Input\VirtualKeyboard.Input.csproj" />
-  </ItemGroup>
 
   <ItemGroup>
     <Folder Include="Composer\" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="VirtualKeyboard.Input" Version="1.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+	<Target Name="PushNuGetPackage" AfterTargets="Pack">
+		<Exec Command="dotnet nuget push $(PackageOutputPath)$(AssemblyName).$(Version).nupkg --source Local" />
+	</Target>
 
 </Project>
