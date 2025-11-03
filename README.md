@@ -1,4 +1,4 @@
-# VirtualKeyboard.Input.Korean
+﻿# VirtualKeyboard.Input.Korean
 
 한글 두벌식 입력 방식을 지원하는 조합기(Composer) 라이브러리입니다.
 

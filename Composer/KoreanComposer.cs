@@ -79,7 +79,21 @@ namespace VirtualKeyboard.Input.Korean.Composer
                 );
             }
 
-            // 상태 2: 초성이 없으면 새로 시작
+            // 상태 2: 중성만 있으면 확정 후 새 초성
+            if (state.ChoseongIndex < 0 && state.JungseongIndex >= 0)
+            {
+                char jungseong = HangulLibrary.JUNGSEONG[state.JungseongIndex];
+                state.Reset();
+                state.ChoseongIndex = choseongIndex;
+
+                return CompositionResult.Succeeded(
+                    choseong.ToString(),
+                    committedText: jungseong.ToString(),
+                    action: ECompositionAction.Input
+                );
+            }
+
+            // 상태 3: 초성도 중성도 없으면 새로 시작
             if (state.ChoseongIndex < 0)
             {
                 state.ChoseongIndex = choseongIndex;
@@ -210,6 +224,16 @@ namespace VirtualKeyboard.Input.Korean.Composer
                         );
                     }
                 }
+
+                // 조합 실패: 현재 음절 확정 후 새 중성 입력
+                string currentSyllable = BuildSyllable(state);
+                state.Reset();
+                state.JungseongIndex = jungseongIndex;
+                return CompositionResult.Succeeded(
+                    jungseong.ToString(),
+                    committedText: currentSyllable,
+                    action: ECompositionAction.Input
+                );
             }
 
             // 상태 3: 종성이 있으면 분리 (종성 → 초성으로 전환)
@@ -301,9 +325,24 @@ namespace VirtualKeyboard.Input.Korean.Composer
                 }
             }
 
-            // 초성 없이 중성만 입력되면 그대로 출력
+            // 초성 없이 중성만 입력
             if (state.ChoseongIndex < 0)
             {
+                // 이미 중성이 있으면 확정 후 새 중성
+                if (state.JungseongIndex >= 0)
+                {
+                    char currentJungseong = HangulLibrary.JUNGSEONG[state.JungseongIndex];
+                    state.Reset();
+                    state.JungseongIndex = jungseongIndex;
+                    return CompositionResult.Succeeded(
+                        jungseong.ToString(),
+                        committedText: currentJungseong.ToString(),
+                        action: ECompositionAction.Input
+                    );
+                }
+
+                // 중성도 없으면 새로 시작
+                state.JungseongIndex = jungseongIndex;
                 return CompositionResult.Succeeded(
                     jungseong.ToString(),
                     action: ECompositionAction.Input
