@@ -1,13 +1,19 @@
 ﻿# VirtualKeyboard.Input.Korean
 
-한글 두벌식 입력 방식을 지원하는 조합기(Composer) 라이브러리입니다.
+한글 입력 방식을 지원하는 조합기(Composer) 라이브러리입니다.
 
 ## 개요
 
-VirtualKeyboard.Input.Korean은 한글의 초성, 중성, 종성을 조합하여 완성된 한글 음절을 생성하는 IME 조합기입니다. 두벌식 입력 방식을 기반으로 복합 자모(ㄳ, ㅘ 등)의 조합과 분해를 지원하며, 자연스러운 한글 입력 경험을 제공합니다.
+VirtualKeyboard.Input.Korean은 한글의 초성, 중성, 종성을 조합하여 완성된 한글 음절을 생성하는 IME 조합기입니다. 두벌식 입력 방식과 천지인 입력 방식을 지원하며, 복합 자모의 조합과 분해를 통해 자연스러운 한글 입력 경험을 제공합니다.
+
+### 지원하는 입력 방식
+
+- **두벌식 (KoreanComposer)**: PC 표준 한글 입력 방식
+- **천지인 (CheonjinComposer)**: 삼성 천지인 키패드 입력 방식
 
 ## 주요 기능
 
+### 두벌식 (KoreanComposer)
 - ✅ **두벌식 한글 조합**: 초성 + 중성 + 종성의 자동 조합
 - ✅ **복합 자모 지원**: 
   - 복합 중성: ㅘ, ㅙ, ㅚ, ㅝ, ㅞ, ㅟ, ㅢ
@@ -16,9 +22,25 @@ VirtualKeyboard.Input.Korean은 한글의 초성, 중성, 종성을 조합하여
 - ✅ **백스페이스 분해**: 복합 자모를 단계별로 분해
 - ✅ **자연스러운 입력**: Windows/macOS 표준 한글 IME와 동일한 동작
 
+### 천지인 (CheonjinComposer)
+- ✅ **기본 자음 7개**: ㄱ, ㄴ, ㄷ, ㅂ, ㅅ, ㅈ, ㅇ (반복 입력으로 순환)
+- ✅ **자음 순환 입력**:
+  - ㄱ → ㅋ → ㄲ → ㄱ
+  - ㄴ → ㄹ → ㄴ
+  - ㄷ → ㅌ → ㄸ → ㄷ
+  - ㅂ → ㅍ → ㅃ → ㅂ
+  - ㅅ → ㅎ → ㅆ → ㅅ
+  - ㅈ → ㅊ → ㅉ → ㅈ
+  - ㅇ → ㅁ → ㅇ
+- ✅ **기본 모음 3개**: ㆍ(천), ㅡ(지), ㅣ(인)
+- ✅ **모음 조합 입력**: 기본 모음 조합으로 21개 중성 생성
+- ✅ **백스페이스 분해**: 조합 단계별 되돌리기
+
 ## 사용 방법
 
-### 1. 기본 사용
+### 두벌식 (KoreanComposer)
+
+#### 1. 기본 사용
 
 ```csharp
 using VirtualKeyboard.Input;
@@ -446,9 +468,124 @@ var result = ime.Commit();
 Console.WriteLine(result.CommittedText);  // "간"
 ```
 
+### 천지인 (CheonjinComposer)
+
+#### 1. 기본 사용
+
+```csharp
+using VirtualKeyboard.Input;
+using VirtualKeyboard.Input.Korean.Composer;
+
+// 천지인 조합기 생성
+var composer = new CheonjinComposer();
+var ime = new IME(composer);
+
+// "가" 입력: ㄱ + ㅣ + ㆍ
+var result = ime.Input('ㄱ');          // "ㄱ"
+result = ime.Input('ㅣ');              // 조합중 (ㅣ만)
+result = ime.Input('ㆍ');              // "가" (ㅣ + ㆍ = ㅏ)
+
+// 확정
+result = ime.Commit();
+Console.WriteLine($"확정: {result.CommittedText}");  // "가"
+```
+
+#### 2. 자음 순환 입력 예제
+
+```csharp
+var ime = new IME(new CheonjinComposer());
+
+// "코" 입력: ㄱ → ㅋ (순환), ㅡ + ㆍ
+ime.Input('ㄱ');  // "ㄱ"
+ime.Input('ㄱ');  // "ㅋ" (순환)
+ime.Input('ㅡ');  // 조합중
+ime.Input('ㆍ');  // "코" (ㅡ + ㆍ = ㅗ)
+
+var result = ime.Commit();
+Console.WriteLine(result.CommittedText);  // "코"
+```
+
+#### 3. 복합 모음 조합 예제
+
+```csharp
+var ime = new IME(new CheonjinComposer());
+
+// "과" 입력: ㄱ + ㅡ + ㆍ + ㅣ
+ime.Input('ㄱ');  // "ㄱ"
+ime.Input('ㅡ');  // 조합중 (ㅡ)
+ime.Input('ㆍ');  // "고" (ㅡ + ㆍ = ㅗ)
+ime.Input('ㅣ');  // "과" (ㅗ 상태에서 ㅣ 추가 → ㅘ)
+
+// "귀" 입력: ㄱ + ㆍ + ㅡ + ㅣ + ㅣ
+ime.Reset();
+ime.Input('ㄱ');  // "ㄱ"
+ime.Input('ㆍ');  // 조합중
+ime.Input('ㅡ');  // "구" (ㆍ + ㅡ = ㅜ)
+ime.Input('ㅣ');  // "귀" (ㅜ 상태에서 ㅣ 추가 → ㅟ)
+
+var result = ime.Commit();
+Console.WriteLine(result.CommittedText);  // "귀"
+```
+
+#### 4. 천지인 모음 조합 규칙
+
+```
+기본 모음 (1개):
+- ㅣ, ㅡ
+
+2중 조합:
+- ㅣ + ㆍ → ㅏ
+- ㆍ + ㅣ → ㅓ
+- ㅡ + ㆍ → ㅗ
+- ㆍ + ㅡ → ㅜ
+- ㅡ + ㅣ → ㅢ
+
+3중 조합:
+- ㅣ + ㆍ + ㆍ → ㅑ
+- ㆍ + ㆍ + ㅣ → ㅕ
+- ㅡ + ㆍ + ㅣ → ㅘ
+- ㆍ + ㅡ + ㅣ → ㅝ
+- ㅡ + ㆍ + ㆍ → ㅛ
+- ㆍ + ㅡ + ㆍ → ㅠ
+
+4중 조합:
+- ㅡ + ㆍ + ㅣ + ㆍ → ㅙ
+- ㆍ + ㅡ + ㅣ + ㆍ → ㅞ
+
+이중모음 (완성된 모음 + ㅣ):
+- ㅏ + ㅣ → ㅐ
+- ㅑ + ㅣ → ㅒ
+- ㅓ + ㅣ → ㅔ
+- ㅕ + ㅣ → ㅖ
+- ㅗ + ㅣ → ㅚ
+- ㅜ + ㅣ → ㅟ
+```
+
+#### 5. 실전 예제: "안녕" 입력
+
+```csharp
+var ime = new IME(new CheonjinComposer());
+
+// "안" 입력
+ime.Input('ㅇ');  // "ㅇ"
+ime.Input('ㅣ');  // 조합중 (ㅣ)
+ime.Input('ㆍ');  // "아" (ㅣ + ㆍ = ㅏ)
+ime.Input('ㄴ');  // "안" (종성 추가)
+
+// "녕" 입력
+ime.Input('ㄴ');  // 확정: "안", 조합: "ㄴ" (새 글자 시작)
+ime.Input('ㆍ');  // 조합중
+ime.Input('ㆍ');  // 조합중
+ime.Input('ㅣ');  // "녀" (ㆍ + ㆍ + ㅣ = ㅕ)
+ime.Input('ㅇ');  // "녕" (종성 추가)
+
+var result = ime.Commit();
+// 최종 결과: "안녕"
+```
+
 ## 제한사항
 
-- 현재 **두벌식 입력만 지원** (세벌식 미지원)
+- 세벌식 미지원
 - 옛한글 미지원 (현대 한글 음절만 지원)
 - 변환 후보 미지원 (일본어/중국어 IME와 달리 한글은 직접 조합 방식)
 
