@@ -8,12 +8,31 @@ namespace VirtualKeyboard.Input.Korean.Models
     /// </summary>
     public class CheonjinState : ICompositionState
     {
+        #region 상수
+
+        /// <summary>
+        /// 초성/중성 인덱스가 없음을 나타내는 상수
+        /// </summary>
+        private const int NO_INDEX = -1;
+
+        /// <summary>
+        /// 종성이 없음을 나타내는 상수
+        /// </summary>
+        private const int NO_JONGSEONG = 0;
+
+        /// <summary>
+        /// 자음이 없음을 나타내는 상수
+        /// </summary>
+        private const char NO_CHAR = '\0';
+
+        #endregion
+
         #region 자음 관련 상태
 
         /// <summary>
         /// 마지막 입력된 기본 자음 (ㄱ, ㄴ, ㄷ, ㅂ, ㅅ, ㅈ, ㅇ)
         /// </summary>
-        public char LastInputConsonant { get; set; } = '\0';
+        public char LastInputConsonant { get; set; } = NO_CHAR;
 
         /// <summary>
         /// 현재 자음 순환 인덱스
@@ -24,16 +43,26 @@ namespace VirtualKeyboard.Input.Korean.Models
         /// <summary>
         /// 현재 조합된 자음
         /// </summary>
-        public char CurrentConsonant { get; set; } = '\0';
+        public char CurrentConsonant { get; set; } = NO_CHAR;
 
         #endregion
 
         #region 모음 관련 상태
 
         /// <summary>
-        /// 입력된 기본 모음 시퀀스 (ㆍ, ㅡ, ㅣ)
+        /// 입력된 기본 모음 시퀀스 (ㆍ, ㅡ, ㅣ) - 내부 리스트
         /// </summary>
-        public List<char> VowelSequence { get; set; } = new List<char>();
+        private readonly List<char> _vowelSequence = new List<char>();
+
+        /// <summary>
+        /// 입력된 기본 모음 시퀀스 (읽기 전용)
+        /// </summary>
+        public IReadOnlyList<char> VowelSequence => _vowelSequence;
+
+        /// <summary>
+        /// 내부적으로 VowelSequence에 접근하기 위한 속성
+        /// </summary>
+        internal List<char> VowelSequenceInternal => _vowelSequence;
 
         /// <summary>
         /// 모음이 입력되었는지 여부
@@ -47,23 +76,23 @@ namespace VirtualKeyboard.Input.Korean.Models
         /// <summary>
         /// 최종 조합된 초성 인덱스 (-1이면 없음)
         /// </summary>
-        public int ChoseongIndex { get; set; } = -1;
+        public int ChoseongIndex { get; set; } = NO_INDEX;
 
         /// <summary>
         /// 최종 조합된 중성 인덱스 (-1이면 없음)
         /// </summary>
-        public int JungseongIndex { get; set; } = -1;
+        public int JungseongIndex { get; set; } = NO_INDEX;
 
         /// <summary>
         /// 최종 조합된 종성 인덱스 (0이면 없음)
         /// </summary>
-        public int JongseongIndex { get; set; } = 0;
+        public int JongseongIndex { get; set; } = NO_JONGSEONG;
 
         /// <summary>
         /// 복합 종성 조합 대기 중인 자음 ('\0'이면 없음)
         /// 예: "안ㅅ" 상태에서 'ㅅ'
         /// </summary>
-        public char PendingJongseong { get; set; } = '\0';
+        public char PendingJongseong { get; set; } = NO_CHAR;
 
         #endregion
 
@@ -73,25 +102,26 @@ namespace VirtualKeyboard.Input.Korean.Models
         /// 조합 중인지 여부
         /// </summary>
         public bool IsComposing =>
-            ChoseongIndex >= 0 || JungseongIndex >= 0 || VowelSequence.Count > 0 || PendingJongseong != '\0';
+            ChoseongIndex >= NO_INDEX + 1 || JungseongIndex >= NO_INDEX + 1 ||
+            VowelSequence.Count > 0 || PendingJongseong != NO_CHAR;
 
         /// <summary>
         /// 초성만 있는 상태
         /// </summary>
         public bool HasChoseongOnly =>
-            ChoseongIndex >= 0 && JungseongIndex < 0 && JongseongIndex == 0;
+            ChoseongIndex >= NO_INDEX + 1 && JungseongIndex == NO_INDEX && JongseongIndex == NO_JONGSEONG;
 
         /// <summary>
         /// 초성 + 중성만 있는 상태
         /// </summary>
         public bool HasChoseongAndJungseong =>
-            ChoseongIndex >= 0 && JungseongIndex >= 0 && JongseongIndex == 0;
+            ChoseongIndex >= NO_INDEX + 1 && JungseongIndex >= NO_INDEX + 1 && JongseongIndex == NO_JONGSEONG;
 
         /// <summary>
         /// 완성된 음절 (초성 + 중성 + 종성)
         /// </summary>
         public bool IsComplete =>
-            ChoseongIndex >= 0 && JungseongIndex >= 0 && JongseongIndex > 0;
+            ChoseongIndex >= NO_INDEX + 1 && JungseongIndex >= NO_INDEX + 1 && JongseongIndex > NO_JONGSEONG;
 
         #endregion
 
@@ -102,15 +132,15 @@ namespace VirtualKeyboard.Input.Korean.Models
         /// </summary>
         public void Reset()
         {
-            LastInputConsonant = '\0';
+            LastInputConsonant = NO_CHAR;
             ConsonantCycleIndex = 0;
-            CurrentConsonant = '\0';
-            VowelSequence.Clear();
+            CurrentConsonant = NO_CHAR;
+            _vowelSequence.Clear();
             HasVowel = false;
-            ChoseongIndex = -1;
-            JungseongIndex = -1;
-            JongseongIndex = 0;
-            PendingJongseong = '\0';
+            ChoseongIndex = NO_INDEX;
+            JungseongIndex = NO_INDEX;
+            JongseongIndex = NO_JONGSEONG;
+            PendingJongseong = NO_CHAR;
         }
 
         /// <summary>
@@ -118,18 +148,19 @@ namespace VirtualKeyboard.Input.Korean.Models
         /// </summary>
         public ICompositionState Clone()
         {
-            return new CheonjinState
+            var cloned = new CheonjinState
             {
                 LastInputConsonant = LastInputConsonant,
                 ConsonantCycleIndex = ConsonantCycleIndex,
                 CurrentConsonant = CurrentConsonant,
-                VowelSequence = new List<char>(VowelSequence),
                 HasVowel = HasVowel,
                 ChoseongIndex = ChoseongIndex,
                 JungseongIndex = JungseongIndex,
                 JongseongIndex = JongseongIndex,
                 PendingJongseong = PendingJongseong
             };
+            cloned._vowelSequence.AddRange(_vowelSequence);
+            return cloned;
         }
 
         /// <summary>

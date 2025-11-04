@@ -13,6 +13,27 @@ namespace VirtualKeyboard.Input.Korean.Composer
     /// </summary>
     public class CheonjinComposer : IInputComposer
     {
+        #region 상수
+
+        /// <summary>
+        /// 에러 메시지 상수
+        /// </summary>
+        private static class ErrorMessages
+        {
+            public const string UnsupportedInput = "지원하지 않는 입력";
+            public const string UnprocessableInput = "처리할 수 없는 입력";
+            public const string NotComposing = "조합 중이 아님";
+            public const string NoCandidateSupport = "천지인은 변환 후보를 지원하지 않습니다";
+            public const string InvalidStateType = "잘못된 상태 타입";
+        }
+
+        /// <summary>
+        /// 자음 → 기본 자음 역매핑 캐시 (성능 최적화)
+        /// </summary>
+        private static readonly Dictionary<char, char> _consonantToBaseMap = BuildConsonantToBaseMap();
+
+        #endregion
+
         #region IInputComposer 속성
 
         public string Name => "천지인 조합기";
@@ -45,9 +66,10 @@ namespace VirtualKeyboard.Input.Korean.Composer
         public CompositionResult ProcessInput(CompositionContext context, string input)
         {
             if (!CanProcess(input))
-                return CompositionResult.Failed("지원하지 않는 입력");
+                return CompositionResult.Failed(ErrorMessages.UnsupportedInput);
 
-            var state = (CheonjinState)context.State;
+            if (!(context?.State is CheonjinState state))
+                return CompositionResult.Failed(ErrorMessages.InvalidStateType);
             char inputChar = input[0];
 
             // 자음 입력 (ㄱ, ㄴ, ㄷ, ㅂ, ㅅ, ㅈ, ㅇ - 반복시 순환)
@@ -62,7 +84,40 @@ namespace VirtualKeyboard.Input.Korean.Composer
                 return ProcessCheonjinVowel(state, inputChar);
             }
 
-            return CompositionResult.Failed("처리할 수 없는 입력");
+            return CompositionResult.Failed(ErrorMessages.UnprocessableInput);
+        }
+
+        #endregion
+
+        #region 초기화 및 유틸리티
+
+        /// <summary>
+        /// 자음 → 기본 자음 역매핑 딕셔너리 생성
+        /// </summary>
+        private static Dictionary<char, char> BuildConsonantToBaseMap()
+        {
+            var map = new Dictionary<char, char>();
+            foreach (var baseChar in CheonjinLibrary.BASE_CONSONANTS)
+            {
+                if (CheonjinLibrary.TryGetConsonantCycle(baseChar, out var cycle))
+                {
+                    foreach (var c in cycle)
+                    {
+                        map[c] = baseChar;
+                    }
+                }
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// 자음의 기본 자음 반환 (역매핑) - O(1) 성능
+        /// </summary>
+        private char GetBaseConsonant(char consonant)
+        {
+            return _consonantToBaseMap.TryGetValue(consonant, out char baseConsonant)
+                ? baseConsonant
+                : consonant;
         }
 
         #endregion
@@ -74,260 +129,290 @@ namespace VirtualKeyboard.Input.Korean.Composer
         /// </summary>
         private CompositionResult ProcessCheonjinConsonant(CheonjinState state, char baseConsonant)
         {
-            // 같은 기본 자음을 연속으로 눌렀는지 확인
             bool isSameConsonant = state.LastInputConsonant == baseConsonant;
 
-            // PendingJongseong이 있는 상태 처리
+            // 1. PendingJongseong이 있는 상태 처리
             if (state.PendingJongseong != '\0')
             {
-                char pendingBase = GetBaseConsonant(state.PendingJongseong);
-
-                // 같은 기본 자음이면 순환
-                if (pendingBase == baseConsonant)
-                {
-                    int cycleLength = CheonjinUtil.GetConsonantCycleLength(baseConsonant);
-                    int nextIndex = (state.ConsonantCycleIndex + 1) % cycleLength;
-                    char nextConsonant = CheonjinUtil.GetConsonantAtIndex(baseConsonant, nextIndex);
-                    state.ConsonantCycleIndex = nextIndex;
-                    state.PendingJongseong = nextConsonant;
-                    state.LastInputConsonant = baseConsonant;
-
-                    // 복합 종성 조합 재시도
-                    char currentJongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
-                    if (HangulUtil.TryCombineJongseong(currentJongseong, nextConsonant, out char combined))
-                    {
-                        int combinedIndex = HangulLibrary.GetJongseongIndex(combined);
-                        if (combinedIndex > 0)
-                        {
-                            state.JongseongIndex = combinedIndex;
-                            state.PendingJongseong = '\0';  // 조합 성공하면 pending 제거
-                        }
-                    }
-
-                    string syllable = BuildSyllable(state);
-                    return CompositionResult.Succeeded(
-                        syllable,
-                        action: ECompositionAction.Update
-                    );
-                }
-                else
-                {
-                    // 다른 기본 자음이면 현재 음절 확정 후 새 글자 시작
-                    string committed = BuildSyllable(state);
-                    state.Reset();
-
-                    char newConsonant = CheonjinUtil.GetFirstConsonant(baseConsonant);
-                    state.LastInputConsonant = baseConsonant;
-                    state.ConsonantCycleIndex = 0;
-                    state.CurrentConsonant = newConsonant;
-                    state.ChoseongIndex = HangulLibrary.GetChoseongIndex(newConsonant);
-
-                    return CompositionResult.Succeeded(
-                        newConsonant.ToString(),
-                        committedText: committed,
-                        action: ECompositionAction.Input
-                    );
-                }
+                return ProcessPendingJongseongConsonant(state, baseConsonant);
             }
 
-            // 복합 종성 상태에서 같은 자음 반복 → 복합 종성 분해 후 순환 계속
-            if (state.IsComplete && isSameConsonant && state.LastInputConsonant == baseConsonant)
-            {
-                char currentJongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
-
-                // 복합 종성이면 분해
-                if (HangulUtil.TryDecomposeJongseong(currentJongseong, out char first, out char second))
-                {
-                    // 복합 종성의 두 번째 자음이 현재 순환 중인 자음인지 확인
-                    char secondBase = GetBaseConsonant(second);
-                    if (secondBase == baseConsonant)
-                    {
-                        // 첫 번째만 종성으로, 두 번째는 순환 계속
-                        int firstIndex = HangulLibrary.GetJongseongIndex(first);
-                        state.JongseongIndex = firstIndex;
-
-                        int cycleLength = CheonjinUtil.GetConsonantCycleLength(baseConsonant);
-                        int nextIndex = (state.ConsonantCycleIndex + 1) % cycleLength;
-                        char nextConsonant = CheonjinUtil.GetConsonantAtIndex(baseConsonant, nextIndex);
-                        state.ConsonantCycleIndex = nextIndex;
-                        state.PendingJongseong = nextConsonant;
-
-                        // 복합 종성 재시도
-                        if (HangulUtil.TryCombineJongseong(first, nextConsonant, out char combined))
-                        {
-                            int combinedIndex = HangulLibrary.GetJongseongIndex(combined);
-                            if (combinedIndex > 0)
-                            {
-                                state.JongseongIndex = combinedIndex;
-                                state.PendingJongseong = '\0';
-                            }
-                        }
-
-                        string syllable = BuildSyllable(state);
-                        return CompositionResult.Succeeded(
-                            syllable,
-                            action: ECompositionAction.Update
-                        );
-                    }
-                }
-            }
-
-            // 종성이 있는 상태에서 같은 자음 반복 → 종성 순환
-            // state.IsComplete 조건으로 새 글자 시작 시에는 순환 안됨
+            // 2. 복합 종성 상태에서 같은 자음 반복 → 복합 종성 분해 후 순환
             if (state.IsComplete && isSameConsonant)
             {
-                // 현재 종성의 기본 자음 확인
-                char currentJongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
-                char currentBase = GetBaseConsonant(currentJongseong);
-
-                if (currentBase == baseConsonant)
-                {
-                    // 종성 순환: 다음 자음으로
-                    int cycleLength = CheonjinUtil.GetConsonantCycleLength(baseConsonant);
-                    int nextIndex = (state.ConsonantCycleIndex + 1) % cycleLength;
-                    char nextConsonant = CheonjinUtil.GetConsonantAtIndex(baseConsonant, nextIndex);
-                    state.ConsonantCycleIndex = nextIndex;
-                    state.CurrentConsonant = nextConsonant;
-
-                    int nextJongseongIndex = HangulLibrary.GetJongseongIndex(nextConsonant);
-                    if (nextJongseongIndex > 0)
-                    {
-                        state.JongseongIndex = nextJongseongIndex;
-                        string syllable = BuildSyllable(state);
-                        return CompositionResult.Succeeded(
-                            syllable,
-                            action: ECompositionAction.Update
-                        );
-                    }
-                }
+                var result = TryProcessComplexJongseongCycle(state, baseConsonant);
+                if (result.HasValue) return result.Value;
             }
 
-            // 종성이 있는 상태에서 다른 자음 입력 → 복합 종성 조합 시도
+            // 3. 종성이 있는 상태에서 같은 자음 반복 → 종성 순환
+            if (state.IsComplete && isSameConsonant)
+            {
+                var result = TryProcessSimpleJongseongCycle(state, baseConsonant);
+                if (result.HasValue) return result.Value;
+            }
+
+            // 4. 종성이 있는 상태에서 다른 자음 입력 → 복합 종성 조합 시도
             if (state.IsComplete && !isSameConsonant)
             {
-                char currentJongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
-                char newConsonant = CheonjinUtil.GetFirstConsonant(baseConsonant);
-
-                // 복합 종성 조합 시도
-                if (HangulUtil.TryCombineJongseong(currentJongseong, newConsonant, out char combined))
-                {
-                    int combinedIndex = HangulLibrary.GetJongseongIndex(combined);
-                    if (combinedIndex > 0)
-                    {
-                        state.JongseongIndex = combinedIndex;
-                        state.LastInputConsonant = baseConsonant;
-                        state.ConsonantCycleIndex = 0;
-
-                        string syllable = BuildSyllable(state);
-                        return CompositionResult.Succeeded(
-                            syllable,
-                            action: ECompositionAction.Update
-                        );
-                    }
-                }
-
-                // 조합 불가능하면 PendingJongseong에 저장하고 대기 (복합 종성 가능성 유지)
-                state.PendingJongseong = newConsonant;
-                state.LastInputConsonant = baseConsonant;
-                state.ConsonantCycleIndex = 0;
-
-                string result = BuildSyllable(state);
-                return CompositionResult.Succeeded(
-                    result,
-                    action: ECompositionAction.Input
-                );
+                return ProcessJongseongCombination(state, baseConsonant);
             }
 
-            // 초성 + 중성 상태에서 자음 입력 → 종성 처리 (종성이 아직 없는 경우)
+            // 5. 초성 + 중성 상태에서 자음 입력 → 종성 처리
             if (state.HasChoseongAndJungseong && state.JongseongIndex == 0)
             {
-                char consonant = CheonjinUtil.GetFirstConsonant(baseConsonant);
-                int jongseongIndex = HangulLibrary.GetJongseongIndex(consonant);
-
-                if (jongseongIndex > 0)
-                {
-                    // 종성으로 추가
-                    state.JongseongIndex = jongseongIndex;
-                    state.LastInputConsonant = baseConsonant;
-                    state.ConsonantCycleIndex = 0;  // 현재 index 0의 자음 사용 중
-                    state.CurrentConsonant = consonant;
-                    string syllable = BuildSyllable(state);
-
-                    return CompositionResult.Succeeded(
-                        syllable,
-                        action: ECompositionAction.Input
-                    );
-                }
+                var result = TryAddNewJongseong(state, baseConsonant);
+                if (result.HasValue) return result.Value;
             }
 
-            // 초성만 있는 상태에서 같은 자음 반복 → 순환
+            // 6. 초성만 있는 상태에서 같은 자음 반복 → 순환
             if (state.HasChoseongOnly && isSameConsonant)
             {
-                // 순환: 다음 자음으로 전환
-                char nextConsonant = CheonjinUtil.GetNextConsonant(baseConsonant, state.ConsonantCycleIndex);
-                state.ConsonantCycleIndex++;
-                state.CurrentConsonant = nextConsonant;
-                state.ChoseongIndex = HangulLibrary.GetChoseongIndex(nextConsonant);
-
-                return CompositionResult.Succeeded(
-                    nextConsonant.ToString(),
-                    action: ECompositionAction.Update
-                );
+                return ProcessChoseongCycle(state, baseConsonant);
             }
-            else
-            {
-                // 새로운 자음 시작
-                char consonant = CheonjinUtil.GetFirstConsonant(baseConsonant);
 
-                // 이미 조합 중이면 확정 후 새 글자 시작
-                if (state.IsComposing)
-                {
-                    string committed = BuildSyllable(state);
-                    state.Reset();
-
-                    state.LastInputConsonant = baseConsonant;
-                    state.ConsonantCycleIndex = 0;
-                    state.CurrentConsonant = consonant;
-                    state.ChoseongIndex = HangulLibrary.GetChoseongIndex(consonant);
-
-                    return CompositionResult.Succeeded(
-                        consonant.ToString(),
-                        committedText: committed,
-                        action: ECompositionAction.Input
-                    );
-                }
-
-                // 새 글자 시작
-                state.LastInputConsonant = baseConsonant;
-                state.ConsonantCycleIndex = 0;
-                state.CurrentConsonant = consonant;
-                state.ChoseongIndex = HangulLibrary.GetChoseongIndex(consonant);
-
-                return CompositionResult.Succeeded(
-                    consonant.ToString(),
-                    action: ECompositionAction.Input
-                );
-            }
+            // 7. 새로운 자음 시작 (기본 케이스)
+            return ProcessNewConsonant(state, baseConsonant);
         }
 
         /// <summary>
-        /// 자음의 기본 자음 반환 (역매핑)
+        /// PendingJongseong이 있는 상태에서 자음 입력 처리
         /// </summary>
-        private char GetBaseConsonant(char consonant)
+        private CompositionResult ProcessPendingJongseongConsonant(CheonjinState state, char baseConsonant)
         {
-            // 각 자음 순환 그룹에서 기본 자음 찾기
-            foreach (var baseChar in CheonjinLibrary.BASE_CONSONANTS)
+            char pendingBase = GetBaseConsonant(state.PendingJongseong);
+
+            // 같은 기본 자음이면 순환
+            if (pendingBase == baseConsonant)
             {
-                if (CheonjinLibrary.TryGetConsonantCycle(baseChar, out var cycle))
+                return CyclePendingJongseong(state, baseConsonant);
+            }
+
+            // 다른 기본 자음이면 현재 음절 확정 후 새 글자 시작
+            return CommitAndStartNewConsonant(state, baseConsonant);
+        }
+
+        /// <summary>
+        /// PendingJongseong 순환 처리
+        /// </summary>
+        private CompositionResult CyclePendingJongseong(CheonjinState state, char baseConsonant)
+        {
+            int cycleLength = CheonjinUtil.GetConsonantCycleLength(baseConsonant);
+            int nextIndex = (state.ConsonantCycleIndex + 1) % cycleLength;
+            char nextConsonant = CheonjinUtil.GetConsonantAtIndex(baseConsonant, nextIndex);
+
+            state.ConsonantCycleIndex = nextIndex;
+            state.PendingJongseong = nextConsonant;
+            state.LastInputConsonant = baseConsonant;
+
+            // 복합 종성 조합 재시도
+            char currentJongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
+            if (HangulUtil.TryCombineJongseong(currentJongseong, nextConsonant, out char combined))
+            {
+                int combinedIndex = HangulLibrary.GetJongseongIndex(combined);
+                if (combinedIndex > 0)
                 {
-                    foreach (var c in cycle)
-                    {
-                        if (c == consonant)
-                            return baseChar;
-                    }
+                    state.JongseongIndex = combinedIndex;
+                    state.PendingJongseong = '\0';
                 }
             }
-            return consonant;
+
+            return CompositionResult.Succeeded(
+                BuildSyllable(state),
+                action: ECompositionAction.Update
+            );
+        }
+
+        /// <summary>
+        /// 현재 음절 확정 후 새 자음으로 시작
+        /// </summary>
+        private CompositionResult CommitAndStartNewConsonant(CheonjinState state, char baseConsonant)
+        {
+            string committed = BuildSyllable(state);
+            state.Reset();
+
+            char newConsonant = CheonjinUtil.GetFirstConsonant(baseConsonant);
+            state.LastInputConsonant = baseConsonant;
+            state.ConsonantCycleIndex = 0;
+            state.CurrentConsonant = newConsonant;
+            state.ChoseongIndex = HangulLibrary.GetChoseongIndex(newConsonant);
+
+            return CompositionResult.Succeeded(
+                newConsonant.ToString(),
+                committedText: committed,
+                action: ECompositionAction.Input
+            );
+        }
+
+        /// <summary>
+        /// 복합 종성 분해 후 순환 시도
+        /// </summary>
+        private CompositionResult? TryProcessComplexJongseongCycle(CheonjinState state, char baseConsonant)
+        {
+            char currentJongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
+
+            // 복합 종성이면 분해
+            if (!HangulUtil.TryDecomposeJongseong(currentJongseong, out char first, out char second))
+                return null;
+
+            // 복합 종성의 두 번째 자음이 현재 순환 중인 자음인지 확인
+            char secondBase = GetBaseConsonant(second);
+            if (secondBase != baseConsonant)
+                return null;
+
+            // 첫 번째만 종성으로, 두 번째는 순환 계속
+            state.JongseongIndex = HangulLibrary.GetJongseongIndex(first);
+
+            int cycleLength = CheonjinUtil.GetConsonantCycleLength(baseConsonant);
+            int nextIndex = (state.ConsonantCycleIndex + 1) % cycleLength;
+            char nextConsonant = CheonjinUtil.GetConsonantAtIndex(baseConsonant, nextIndex);
+
+            state.ConsonantCycleIndex = nextIndex;
+            state.PendingJongseong = nextConsonant;
+
+            // 복합 종성 재시도
+            if (HangulUtil.TryCombineJongseong(first, nextConsonant, out char combined))
+            {
+                int combinedIndex = HangulLibrary.GetJongseongIndex(combined);
+                if (combinedIndex > 0)
+                {
+                    state.JongseongIndex = combinedIndex;
+                    state.PendingJongseong = '\0';
+                }
+            }
+
+            return CompositionResult.Succeeded(
+                BuildSyllable(state),
+                action: ECompositionAction.Update
+            );
+        }
+
+        /// <summary>
+        /// 단일 종성 순환 시도
+        /// </summary>
+        private CompositionResult? TryProcessSimpleJongseongCycle(CheonjinState state, char baseConsonant)
+        {
+            char currentJongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
+            char currentBase = GetBaseConsonant(currentJongseong);
+
+            if (currentBase != baseConsonant)
+                return null;
+
+            // 종성 순환: 다음 자음으로
+            int cycleLength = CheonjinUtil.GetConsonantCycleLength(baseConsonant);
+            int nextIndex = (state.ConsonantCycleIndex + 1) % cycleLength;
+            char nextConsonant = CheonjinUtil.GetConsonantAtIndex(baseConsonant, nextIndex);
+
+            state.ConsonantCycleIndex = nextIndex;
+            state.CurrentConsonant = nextConsonant;
+
+            int nextJongseongIndex = HangulLibrary.GetJongseongIndex(nextConsonant);
+            if (nextJongseongIndex <= 0)
+                return null;
+
+            state.JongseongIndex = nextJongseongIndex;
+            return CompositionResult.Succeeded(
+                BuildSyllable(state),
+                action: ECompositionAction.Update
+            );
+        }
+
+        /// <summary>
+        /// 종성이 있는 상태에서 다른 자음 입력 → 복합 종성 조합 시도
+        /// </summary>
+        private CompositionResult ProcessJongseongCombination(CheonjinState state, char baseConsonant)
+        {
+            char currentJongseong = HangulLibrary.JONGSEONG[state.JongseongIndex];
+            char newConsonant = CheonjinUtil.GetFirstConsonant(baseConsonant);
+
+            // 복합 종성 조합 시도
+            if (HangulUtil.TryCombineJongseong(currentJongseong, newConsonant, out char combined))
+            {
+                int combinedIndex = HangulLibrary.GetJongseongIndex(combined);
+                if (combinedIndex > 0)
+                {
+                    state.JongseongIndex = combinedIndex;
+                    state.LastInputConsonant = baseConsonant;
+                    state.ConsonantCycleIndex = 0;
+
+                    return CompositionResult.Succeeded(
+                        BuildSyllable(state),
+                        action: ECompositionAction.Update
+                    );
+                }
+            }
+
+            // 조합 불가능하면 PendingJongseong에 저장하고 대기
+            state.PendingJongseong = newConsonant;
+            state.LastInputConsonant = baseConsonant;
+            state.ConsonantCycleIndex = 0;
+
+            return CompositionResult.Succeeded(
+                BuildSyllable(state),
+                action: ECompositionAction.Input
+            );
+        }
+
+        /// <summary>
+        /// 초성 + 중성 상태에서 종성 추가 시도
+        /// </summary>
+        private CompositionResult? TryAddNewJongseong(CheonjinState state, char baseConsonant)
+        {
+            char consonant = CheonjinUtil.GetFirstConsonant(baseConsonant);
+            int jongseongIndex = HangulLibrary.GetJongseongIndex(consonant);
+
+            if (jongseongIndex <= 0)
+                return null;
+
+            state.JongseongIndex = jongseongIndex;
+            state.LastInputConsonant = baseConsonant;
+            state.ConsonantCycleIndex = 0;
+            state.CurrentConsonant = consonant;
+
+            return CompositionResult.Succeeded(
+                BuildSyllable(state),
+                action: ECompositionAction.Input
+            );
+        }
+
+        /// <summary>
+        /// 초성만 있는 상태에서 자음 순환
+        /// </summary>
+        private CompositionResult ProcessChoseongCycle(CheonjinState state, char baseConsonant)
+        {
+            char nextConsonant = CheonjinUtil.GetNextConsonant(baseConsonant, state.ConsonantCycleIndex);
+            state.ConsonantCycleIndex++;
+            state.CurrentConsonant = nextConsonant;
+            state.ChoseongIndex = HangulLibrary.GetChoseongIndex(nextConsonant);
+
+            return CompositionResult.Succeeded(
+                nextConsonant.ToString(),
+                action: ECompositionAction.Update
+            );
+        }
+
+        /// <summary>
+        /// 새로운 자음 시작
+        /// </summary>
+        private CompositionResult ProcessNewConsonant(CheonjinState state, char baseConsonant)
+        {
+            char consonant = CheonjinUtil.GetFirstConsonant(baseConsonant);
+
+            // 이미 조합 중이면 확정 후 새 글자 시작
+            if (state.IsComposing)
+            {
+                return CommitAndStartNewConsonant(state, baseConsonant);
+            }
+
+            // 새 글자 시작
+            state.LastInputConsonant = baseConsonant;
+            state.ConsonantCycleIndex = 0;
+            state.CurrentConsonant = consonant;
+            state.ChoseongIndex = HangulLibrary.GetChoseongIndex(consonant);
+
+            return CompositionResult.Succeeded(
+                consonant.ToString(),
+                action: ECompositionAction.Input
+            );
         }
 
         #endregion
@@ -354,13 +439,13 @@ namespace VirtualKeyboard.Input.Korean.Composer
                 int newChoseongIndex = HangulLibrary.GetChoseongIndex(pendingConsonant);
                 state.ChoseongIndex = newChoseongIndex;
 
-                state.VowelSequence.Add(vowel);
-                if (CheonjinUtil.TryCombineVowel(state.VowelSequence, out char combinedVowel))
+                state.VowelSequenceInternal.Add(vowel);
+                if (CheonjinUtil.TryCombineVowel(state.VowelSequenceInternal, out char combinedVowel))
                 {
                     state.JungseongIndex = HangulLibrary.GetJungseongIndex(combinedVowel);
                     state.HasVowel = true;
-                    state.VowelSequence.Clear();
-                    state.VowelSequence.Add(combinedVowel);
+                    state.VowelSequenceInternal.Clear();
+                    state.VowelSequenceInternal.Add(combinedVowel);
                 }
 
                 string newSyllable = BuildSyllable(state);
@@ -391,8 +476,8 @@ namespace VirtualKeyboard.Input.Korean.Composer
                     int newChoseongIndex = HangulLibrary.GetChoseongIndex(second);
                     state.ChoseongIndex = newChoseongIndex;
 
-                    state.VowelSequence.Add(vowel);
-                    if (CheonjinUtil.TryCombineVowel(state.VowelSequence, out char combinedVowel))
+                    state.VowelSequenceInternal.Add(vowel);
+                    if (CheonjinUtil.TryCombineVowel(state.VowelSequenceInternal, out char combinedVowel))
                     {
                         state.JungseongIndex = HangulLibrary.GetJungseongIndex(combinedVowel);
                         state.HasVowel = true;
@@ -417,8 +502,8 @@ namespace VirtualKeyboard.Input.Korean.Composer
                     state.Reset();
                     state.ChoseongIndex = newChoseongIndex;
 
-                    state.VowelSequence.Add(vowel);
-                    if (CheonjinUtil.TryCombineVowel(state.VowelSequence, out char combinedVowel))
+                    state.VowelSequenceInternal.Add(vowel);
+                    if (CheonjinUtil.TryCombineVowel(state.VowelSequenceInternal, out char combinedVowel))
                     {
                         state.JungseongIndex = HangulLibrary.GetJungseongIndex(combinedVowel);
                         state.HasVowel = true;
@@ -435,19 +520,19 @@ namespace VirtualKeyboard.Input.Korean.Composer
             }
 
             // 초성 없이 모음만 있는 경우
-            if (state.ChoseongIndex < 0 && state.VowelSequence.Count > 0)
+            if (state.ChoseongIndex < 0 && state.VowelSequenceInternal.Count > 0)
             {
                 // 먼저 기존 시퀀스에 새 모음을 추가하여 조합 시도
-                state.VowelSequence.Add(vowel);
+                state.VowelSequenceInternal.Add(vowel);
 
-                if (CheonjinUtil.TryCombineVowel(state.VowelSequence, out char combinedVowel))
+                if (CheonjinUtil.TryCombineVowel(state.VowelSequenceInternal, out char combinedVowel))
                 {
                     state.JungseongIndex = HangulLibrary.GetJungseongIndex(combinedVowel);
                     state.HasVowel = true;
 
                     // 조합 성공 시 시퀀스를 완성된 모음으로 업데이트
-                    state.VowelSequence.Clear();
-                    state.VowelSequence.Add(combinedVowel);
+                    state.VowelSequenceInternal.Clear();
+                    state.VowelSequenceInternal.Add(combinedVowel);
 
                     return CompositionResult.Succeeded(
                         combinedVowel.ToString(),
@@ -458,17 +543,17 @@ namespace VirtualKeyboard.Input.Korean.Composer
                 // 조합 실패 시에도 대기 (나중에 다른 모음이 추가되면 조합될 수 있음)
                 // 예: ㆍㆍ (조합 실패) + ㅣ -> ㆍㆍㅣ (ㅕ)
                 return CompositionResult.Succeeded(
-                    string.Join("", state.VowelSequence),
+                    string.Join("", state.VowelSequenceInternal),
                     action: ECompositionAction.Update
                 );
             }
 
             // 모음 시퀀스에 추가
-            state.VowelSequence.Add(vowel);
-            int originalCount = state.VowelSequence.Count;
+            state.VowelSequenceInternal.Add(vowel);
+            int originalCount = state.VowelSequenceInternal.Count;
 
             // 조합 시도
-            if (CheonjinUtil.TryCombineVowel(state.VowelSequence, out char result))
+            if (CheonjinUtil.TryCombineVowel(state.VowelSequenceInternal, out char result))
             {
                 int jungseongIndex = HangulLibrary.GetJungseongIndex(result);
 
@@ -479,8 +564,8 @@ namespace VirtualKeyboard.Input.Korean.Composer
 
                     // 조합 성공 시 시퀀스를 완성된 모음으로 업데이트
                     // 이렇게 하면 완성된 모음에 추가 모음을 더해 새로운 조합 가능
-                    state.VowelSequence.Clear();
-                    state.VowelSequence.Add(result);
+                    state.VowelSequenceInternal.Clear();
+                    state.VowelSequenceInternal.Add(result);
 
                     string syllable = BuildSyllable(state);
 
@@ -507,10 +592,10 @@ namespace VirtualKeyboard.Input.Korean.Composer
                     if (CheonjinUtil.TryCombineVowel(testSequence, out char combinedVowel))
                     {
                         // 조합 가능! 추가된 vowel 제거하고 first만 남기고 현재 음절 확정
-                        state.VowelSequence.RemoveAt(state.VowelSequence.Count - 1);  // 추가된 vowel 제거
+                        state.VowelSequenceInternal.RemoveAt(state.VowelSequenceInternal.Count - 1);  // 추가된 vowel 제거
                         state.JungseongIndex = HangulLibrary.GetJungseongIndex(first);
-                        state.VowelSequence.Clear();
-                        state.VowelSequence.Add(first);
+                        state.VowelSequenceInternal.Clear();
+                        state.VowelSequenceInternal.Add(first);
 
                         string committed = BuildSyllable(state);
                         state.Reset();
@@ -518,8 +603,8 @@ namespace VirtualKeyboard.Input.Korean.Composer
                         // 새 음절: second + vowel 조합 결과만 저장
                         state.JungseongIndex = HangulLibrary.GetJungseongIndex(combinedVowel);
                         state.HasVowel = true;
-                        state.VowelSequence.Clear();
-                        state.VowelSequence.Add(combinedVowel);
+                        state.VowelSequenceInternal.Clear();
+                        state.VowelSequenceInternal.Add(combinedVowel);
 
                         return CompositionResult.Succeeded(
                             combinedVowel.ToString(),
@@ -530,12 +615,12 @@ namespace VirtualKeyboard.Input.Korean.Composer
                     else
                     {
                         // second + vowel 조합 불가 -> 현재 음절 확정, vowel만 남김
-                        state.VowelSequence.RemoveAt(state.VowelSequence.Count - 1);  // 추가된 vowel 제거
+                        state.VowelSequenceInternal.RemoveAt(state.VowelSequenceInternal.Count - 1);  // 추가된 vowel 제거
                         string committed = BuildSyllable(state);
                         state.Reset();
 
                         // vowel만 새 음절로
-                        state.VowelSequence.Add(vowel);
+                        state.VowelSequenceInternal.Add(vowel);
 
                         // ㆍ는 한글 중성이 아니므로 그대로 출력
                         return CompositionResult.Succeeded(
@@ -567,7 +652,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
             // 천지인에서는 나중에 다른 모음이 추가되면 조합될 수 있으므로 대기
             // 예: ㆍㆍ (조합 실패) + ㅣ -> ㆍㆍㅣ (ㅕ)
             return CompositionResult.Succeeded(
-                string.Join("", state.VowelSequence),
+                string.Join("", state.VowelSequenceInternal),
                 action: ECompositionAction.Input
             );
         }
@@ -578,10 +663,11 @@ namespace VirtualKeyboard.Input.Korean.Composer
 
         public CompositionResult ProcessBackspace(CompositionContext context)
         {
-            var state = (CheonjinState)context.State;
+            if (!(context?.State is CheonjinState state))
+                return CompositionResult.Failed(ErrorMessages.InvalidStateType);
 
             if (!state.IsComposing && state.PendingJongseong == '\0')
-                return CompositionResult.Failed("조합 중이 아님");
+                return CompositionResult.Failed(ErrorMessages.NotComposing);
 
             // PendingJongseong이 있으면 먼저 제거
             if (state.PendingJongseong != '\0')
@@ -612,7 +698,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
             }
 
             // 모음이 있으면 모음 처리
-            if (state.VowelSequence.Count > 0 && state.JungseongIndex >= 0)
+            if (state.VowelSequenceInternal.Count > 0 && state.JungseongIndex >= 0)
             {
                 char jungseong = HangulLibrary.JUNGSEONG[state.JungseongIndex];
 
@@ -623,8 +709,8 @@ namespace VirtualKeyboard.Input.Korean.Composer
                     state.JungseongIndex = HangulLibrary.GetJungseongIndex(first);
 
                     // VowelSequence도 업데이트 (천지인으로 재구성하기 어려우므로 단순화)
-                    state.VowelSequence.Clear();
-                    state.VowelSequence.Add(first);
+                    state.VowelSequenceInternal.Clear();
+                    state.VowelSequenceInternal.Add(first);
 
                     if (state.ChoseongIndex >= 0)
                     {
@@ -644,7 +730,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
                 }
 
                 // 복합 중성이 아니면 모음 전체 제거
-                state.VowelSequence.Clear();
+                state.VowelSequenceInternal.Clear();
                 state.JungseongIndex = -1;
                 state.HasVowel = false;
 
@@ -731,7 +817,7 @@ namespace VirtualKeyboard.Input.Korean.Composer
         public CompositionResult SelectCandidate(CompositionContext context, int candidateIndex)
         {
             // 천지인은 변환 후보를 지원하지 않음
-            return CompositionResult.Failed("천지인은 변환 후보를 지원하지 않습니다");
+            return CompositionResult.Failed(ErrorMessages.NoCandidateSupport);
         }
 
         #endregion
@@ -743,8 +829,6 @@ namespace VirtualKeyboard.Input.Korean.Composer
         /// </summary>
         private string BuildSyllable(CheonjinState state)
         {
-            var result = new StringBuilder();
-
             // 초성만
             if (state.HasChoseongOnly)
             {
@@ -762,15 +846,12 @@ namespace VirtualKeyboard.Input.Korean.Composer
 
                 if (syllable != '\0')
                 {
-                    result.Append(syllable);
-
-                    // 복합 종성 대기 중인 자음이 있으면 추가
+                    // 복합 종성 대기 중인 자음이 있으면 추가 (최대 2글자)
                     if (state.PendingJongseong != '\0')
                     {
-                        result.Append(state.PendingJongseong);
+                        return syllable.ToString() + state.PendingJongseong;
                     }
-
-                    return result.ToString();
+                    return syllable.ToString();
                 }
 
                 return "";
@@ -783,9 +864,9 @@ namespace VirtualKeyboard.Input.Korean.Composer
             }
 
             // 모음 시퀀스만 (조합 안된 경우 - ㆍ 등)
-            if (state.VowelSequence.Count > 0)
+            if (state.VowelSequenceInternal.Count > 0)
             {
-                return string.Join("", state.VowelSequence);
+                return string.Join("", state.VowelSequenceInternal);
             }
 
             return "";
@@ -797,11 +878,11 @@ namespace VirtualKeyboard.Input.Korean.Composer
         private string BuildSyllableInProgress(CheonjinState state)
         {
             // 초성 + 모음 시퀀스 (아직 완성 안됨)
-            if (state.ChoseongIndex >= 0 && state.VowelSequence.Count > 0)
+            if (state.ChoseongIndex >= 0 && state.VowelSequenceInternal.Count > 0)
             {
                 var result = new StringBuilder();
                 result.Append(HangulLibrary.CHOSEONG[state.ChoseongIndex]);
-                result.Append(string.Join("", state.VowelSequence));
+                result.Append(string.Join("", state.VowelSequenceInternal));
                 return result.ToString();
             }
 
