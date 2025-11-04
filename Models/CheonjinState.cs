@@ -59,6 +59,12 @@ namespace VirtualKeyboard.Input.Korean.Models
         /// </summary>
         public int JongseongIndex { get; set; } = 0;
 
+        /// <summary>
+        /// 복합 종성 조합 대기 중인 자음 ('\0'이면 없음)
+        /// 예: "안ㅅ" 상태에서 'ㅅ'
+        /// </summary>
+        public char PendingJongseong { get; set; } = '\0';
+
         #endregion
 
         #region 상태 확인 속성
@@ -67,7 +73,7 @@ namespace VirtualKeyboard.Input.Korean.Models
         /// 조합 중인지 여부
         /// </summary>
         public bool IsComposing =>
-            ChoseongIndex >= 0 || JungseongIndex >= 0 || VowelSequence.Count > 0;
+            ChoseongIndex >= 0 || JungseongIndex >= 0 || VowelSequence.Count > 0 || PendingJongseong != '\0';
 
         /// <summary>
         /// 초성만 있는 상태
@@ -104,6 +110,7 @@ namespace VirtualKeyboard.Input.Korean.Models
             ChoseongIndex = -1;
             JungseongIndex = -1;
             JongseongIndex = 0;
+            PendingJongseong = '\0';
         }
 
         /// <summary>
@@ -120,7 +127,8 @@ namespace VirtualKeyboard.Input.Korean.Models
                 HasVowel = HasVowel,
                 ChoseongIndex = ChoseongIndex,
                 JungseongIndex = JungseongIndex,
-                JongseongIndex = JongseongIndex
+                JongseongIndex = JongseongIndex,
+                PendingJongseong = PendingJongseong
             };
         }
 
