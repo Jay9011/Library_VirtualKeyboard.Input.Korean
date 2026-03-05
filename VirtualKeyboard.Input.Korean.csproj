@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <Title>$(AssemblyName)</Title>
-    <Version>1.0.3</Version>
+    <Version>2.0.1</Version>
     <Authors>Jay9011</Authors>
     <Company>SECUiDEA</Company>
     <Description>한글 가상 키보드 지원</Description>
@@ -11,7 +11,7 @@
     <PackageReadmeFile>ReadMe.md</PackageReadmeFile>
     <RepositoryUrl>http://192.168.0.39/VirtualKeyboard.Input.Korean.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageReleaseNotes>중성 조합 실패에 대한 처리 수정</PackageReleaseNotes>
+    <PackageReleaseNotes>천지인 조합 추가 (복합 종성 대기 기능 추가)</PackageReleaseNotes>
     <AssemblyVersion>$(VersionPrefix)</AssemblyVersion>
     <FileVersion>$(VersionPrefix)</FileVersion>
   </PropertyGroup>
